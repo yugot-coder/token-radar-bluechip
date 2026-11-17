@@ -333,6 +333,12 @@ function buildPeerBook(snapshot: Snapshot, model: ModelConstants): PeerBook {
   return { market, byCategory, byFamily, groups };
 }
 
+/** A group's quantile shrunk toward the market's same quantile, by peer count. */
+function shrunkQuantile(values: number[], market: number[], q: number, model: ModelConstants): number {
+  const w = values.length / (values.length + model.shrink_k);
+  return w * quantile(values, q) + (1 - w) * quantile(market, q);
+}
+
 /** The pricing group one protocol falls into: its category, else its family, else the market. */
 function groupFor(p: SnapshotProtocol, book: PeerBook, model: ModelConstants): { name: string; values: number[] } {
   if (p.category !== null) {
@@ -345,6 +351,53 @@ function groupFor(p: SnapshotProtocol, book: PeerBook, model: ModelConstants): {
     }
   }
   return { name: 'Whole market', values: book.market };
+}
+
+/** One protocol's full pricing: the peer multiple, the factors, the implied value and its range. */
+export interface Implied {
+  groupName: string;
+  groupSize: number;
+  groupP25: number;
+  multiple: number;
+  maturity: number;
+  tvlScale: number;
+  reach: number;
+  momentum: number;
+  age: number | null;
+  implied: number;
+  low: number;
+  high: number;
+}
+
+/**
+ * The one pricing path every row takes: peer p25 multiple, dominant scale factor, small momentum
+ * tilt. No name is special-cased; the same function scores the whole board.
+ */
+export function impliedFor(p: SnapshotProtocol, book: PeerBook, snapshot: Snapshot, model: ModelConstants): Implied {
+  const group = groupFor(p, book, model);
+  const f = scaleFactors(p, snapshot.as_of, model);
+  const scale = f.maturity * f.tvlScale * f.reach;
+  const clampM = (m: number): number => Math.min(model.multiple_max, Math.max(model.multiple_min, m));
+  const multiple = clampM(shrunkQuantile(group.values, book.market, 0.25, model));
+  const lowMultiple = clampM(shrunkQuantile(group.values, book.market, 0.1, model));
+  const highMultiple = clampM(shrunkQuantile(group.values, book.market, 0.5, model));
+  const implied = Math.max(1, Math.round(p.tvl_usd * multiple * scale * f.momentum));
+  const low = Math.max(1, Math.round(p.tvl_usd * lowMultiple * scale * f.momentum));
+  const high = Math.max(implied, Math.round(p.tvl_usd * highMultiple * scale * f.momentum));
+  return {
+    groupName: group.name,
+    groupSize: group.values.length,
+    groupP25: quantile(group.values, 0.25),
+    multiple,
+    maturity: f.maturity,
+    tvlScale: f.tvlScale,
+    reach: f.reach,
+    momentum: f.momentum,
+    age: f.age,
+    implied,
+    low,
+    high,
+  };
 }
 
 /** The three scale components and the momentum tilt for one protocol. */
@@ -398,11 +451,13 @@ export function tierFor(
     };
   }
   const gap =
-    p.tvl_usd < model.established_tvl_usd && (age === null || age < model.established_age_days)
-      ? `below both Established bars ($150M TVL, ${model.established_age_days} days)`
-      : p.tvl_usd < model.established_tvl_usd
-        ? `below the $150M Established TVL bar`
-        : `short of the ${model.established_age_days}-day Established seasoning bar`;
+    age === null
+      ? `its listing age is unreported, so no seasoning can be credited toward Established`
+      : p.tvl_usd < model.established_tvl_usd && age < model.established_age_days
+        ? `below both Established bars ($150M TVL, ${model.established_age_days} days)`
+        : p.tvl_usd < model.established_tvl_usd
+          ? `below the $150M Established TVL bar`
+          : `short of the ${model.established_age_days}-day Established seasoning bar`;
   return {
     tier: 'Emerging',
     reason: `Emerging — ${facts}: ${gap}; the implied value is a lower-quartile claim on an unproven base, so size any farm as speculation, not as a core position.`,
@@ -467,26 +522,12 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
   for (const p of early) chosen.set(p.slug, { p, section: 'Early radar' });
 
   const book = buildPeerBook(snapshot, model);
-  const shrinkQ = (values: number[], q: number): number => {
-    const w = values.length / (values.length + model.shrink_k);
-    return w * quantile(values, q) + (1 - w) * quantile(book.market, q);
-  };
-  const clampMultiple = (m: number): number => Math.min(model.multiple_max, Math.max(model.multiple_min, m));
-
   const scored = [...chosen.values()].map(({ p, section }) => {
-    const group = groupFor(p, book, model);
-    const f = scaleFactors(p, snapshot.as_of, model);
-    const scale = f.maturity * f.tvlScale * f.reach;
-    const multiple = clampMultiple(shrinkQ(group.values, 0.25));
-    const lowMultiple = clampMultiple(shrinkQ(group.values, 0.1));
-    const highMultiple = clampMultiple(shrinkQ(group.values, 0.5));
-    const implied = Math.max(1, Math.round(p.tvl_usd * multiple * scale * f.momentum));
-    const low = Math.max(1, Math.round(p.tvl_usd * lowMultiple * scale * f.momentum));
-    const high = Math.max(implied, Math.round(p.tvl_usd * highMultiple * scale * f.momentum));
-    const { tier, reason } = tierFor(p, f.age, model);
-    return { p, section, group, f, scale, multiple, implied, low, high, tier, reason };
+    const v = impliedFor(p, book, snapshot, model);
+    const { tier, reason } = tierFor(p, v.age, model);
+    return { p, section, v, tier, reason };
   });
-  scored.sort((a, b) => b.implied - a.implied || b.p.tvl_usd - a.p.tvl_usd || (a.p.slug < b.p.slug ? -1 : 1));
+  scored.sort((a, b) => b.v.implied - a.v.implied || b.p.tvl_usd - a.p.tvl_usd || (a.p.slug < b.p.slug ? -1 : 1));
   return scored.map((s, i) => ({
     rank: i + 1,
     slug: s.p.slug,
@@ -503,22 +544,22 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
     section: s.section,
     tier: s.tier,
     tier_reason: s.reason,
-    age_days: s.f.age,
-    implied_value_usd: s.implied,
-    range_low_usd: s.low,
-    range_high_usd: s.high,
+    age_days: s.v.age,
+    implied_value_usd: s.v.implied,
+    range_low_usd: s.v.low,
+    range_high_usd: s.v.high,
     model: {
-      peer_group: s.group.name,
-      peer_count: s.group.values.length,
-      peer_p25: round4(quantile(s.group.values, 0.25)),
-      multiple: round4(s.multiple),
-      maturity_multiplier: round4(s.f.maturity),
-      tvl_scale_multiplier: round4(s.f.tvlScale),
-      reach_multiplier: round4(s.f.reach),
-      momentum_multiplier: round4(s.f.momentum),
-      age_days: s.f.age,
+      peer_group: s.v.groupName,
+      peer_count: s.v.groupSize,
+      peer_p25: round4(s.v.groupP25),
+      multiple: round4(s.v.multiple),
+      maturity_multiplier: round4(s.v.maturity),
+      tvl_scale_multiplier: round4(s.v.tvlScale),
+      reach_multiplier: round4(s.v.reach),
+      momentum_multiplier: round4(s.v.momentum),
+      age_days: s.v.age,
     },
-    farm_steps: farmSteps(s.p, s.f.age, s.tier).map(stepText),
+    farm_steps: farmSteps(s.p, s.v.age, s.tier).map(stepText),
   }));
 }
 
