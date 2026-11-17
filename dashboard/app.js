@@ -78,9 +78,8 @@
       '<h1>Blue-Chip Token Radar</h1>' +
       '<p class="standfirst">A conservative launch radar over the sealed DefiLlama snapshot of ' + esc(DATA.as_of) + '. ' +
       'Every protocol ranked here <b>records no token</b> in that snapshot. Each is priced at the <b>lower quartile</b> of what ' +
-      'comparable tokenised protocols at scale actually sustain per dollar of TVL, then adjusted for the protocol&rsquo;s own ' +
-      'scale, seasoning and reach &mdash; and graded <b>Core</b>, <b>Established</b> or <b>Emerging</b> on stated bars, so a reader ' +
-      'can size a farm the way an allocator would: blue chips first, speculation labelled as speculation.</p>' +
+      'comparable tokenised protocols at scale sustain per dollar of TVL, adjusted for its own scale, seasoning and reach, ' +
+      'and graded <b>Core</b>, <b>Established</b> or <b>Emerging</b> on stated bars &mdash; blue chips first, speculation labelled as speculation.</p>' +
       '<div class="stats">' +
       '<div class="stat"><div class="v">' + DATA.board_size + '</div><div class="k">protocols ranked</div></div>' +
       '<div class="stat"><div class="v">' + DATA.watchlist_size + ' / ' + DATA.watchlist_size + '</div><div class="k">watchlist covered</div></div>' +
@@ -199,7 +198,7 @@
   }
 
   function methodView() {
-    var groups = DATA.peers.map(function (g) {
+    var groups = DATA.peers.filter(function (g) { return g.peers >= 5 || g.kind === 'market'; }).map(function (g) {
       return '<tr><td><b>' + esc(g.name) + '</b></td><td>' + g.kind + '</td><td class="num">' + g.peers + '</td>' +
         '<td class="num">' + fmtMult(g.p10) + '</td><td class="num">' + fmtMult(g.p25) + '</td><td class="num">' + fmtMult(g.median) + '</td><td class="num"><b>' + fmtMult(g.shrunk_p25) + '</b></td></tr>';
     }).join('');
@@ -216,7 +215,9 @@
       'range = the same formula at the group&rsquo;s shrunk p10 (low) and shrunk median (high)</div>' +
       '<p>Shrinkage pulls a small peer group toward the market&rsquo;s quartile by peer count, weight n/(n+6), so five peers ' +
       'move the price less than fifty would. The central claim sits at the lower quartile on purpose: the range above it shows ' +
-      'what the median peer would imply, and a reader who wants the optimistic case can read it there instead.</p>' +
+      'what the median peer would imply, and a reader who wants the optimistic case can read it there instead. ' +
+      'The table below is also why the vault rows price low: the Yield peer group&rsquo;s own p25 is x0.0003 &mdash; a quarter of yield tokens at scale ' +
+      'sustain under a tenth of a cent per TVL dollar &mdash; and the Vaults &amp; allocators family quartile is read off that same evidence, not softened.</p>' +
       '<h3 class="serif">Risk tiers, on stated bars</h3>' +
       '<p><span class="tier tier-Core">Core</span> TVL at or above $1B, listed at least 540 days, on at least 3 chains. ' +
       '<span class="tier tier-Established">Established</span> TVL at or above $150M and listed at least 365 days. ' +
@@ -224,6 +225,7 @@
       'including the bar it falls short of. The tier never changes the price; it tells the reader how to size the farm.</p>' +
       '<h3 class="serif">The peer evidence</h3>' +
       '<table class="plain"><thead><tr><th>Group</th><th>Kind</th><th class="num">Peers</th><th class="num">p10</th><th class="num">p25</th><th class="num">Median</th><th class="num">Shrunk p25 used</th></tr></thead><tbody>' + groups + '</tbody></table>' +
+      '<p>Only groups with at least 5 peers at scale price a row; a thinner category is evidence on the way to its family or the market, never a price of its own.</p>' +
       '<h3 class="serif">Board composition</h3>' +
       '<p>The board holds all ' + DATA.watchlist_size + ' watchlist protocols, ' + DATA.majors_size + ' overlooked majors at or above the $50M floor that pass every test of the ' +
       'house&rsquo;s watchlist rule the snapshot itself can show (only the parent-protocol record, which the snapshot does not carry, can have kept them off the list), and ' +

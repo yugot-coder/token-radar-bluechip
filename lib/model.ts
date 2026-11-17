@@ -607,6 +607,21 @@ function actionFor(p: SnapshotProtocol, capital: number, chain: string): string 
   return `Deposit $${capital} of USDC into ${name} on ${chain} through its own app and keep the position open.`;
 }
 
+/** The weekly qualifying action, in the category's own terms. */
+function weeklyFor(p: SnapshotProtocol): string {
+  const c = (p.category ?? '').toLowerCase();
+  if (c.includes('curator') || c.includes('allocator')) return 'a small top-up deposit or a reallocation between vaults';
+  if (c.includes('lend') || c.includes('cdp') || c.includes('collateral')) return 'a small top-up supply or a partial repay-and-resupply cycle';
+  if (c.includes('dex')) return 'a small swap through the pool you provide to';
+  if (c.includes('derivative') || c.includes('perpetual')) return 'one small hedged trade, opened and closed inside the week';
+  if (c.includes('prediction')) return 'one small position in a liquid market you follow';
+  if (c.includes('bridge')) return 'one small bridge transfer in either direction';
+  if (c.includes('staking') || c.includes('restak')) return 'a small additional stake or a claim of staking rewards';
+  if (c.includes('stable') || c.includes('rwa') || c.includes('money')) return 'a small additional mint or deposit';
+  if (c.includes('insurance')) return 'a renewal check on the cover and one new quote';
+  return 'a deposit, a borrow, a swap or a vote';
+}
+
 /**
  * A protocol's farm plan: seven steps, each an action with a cost and a time, written for a cautious
  * farmer: verify the venue first, test the exit with small size, stay in the protocol's own contracts,
@@ -646,7 +661,7 @@ export function farmSteps(p: SnapshotProtocol, age: number | null, tier: Tier): 
       time: '5 minutes to check the contract address against the official docs',
     },
     {
-      text: `Make one qualifying action each week in ${p.name} — a deposit, a borrow, a swap or a vote — and log the wallet, dates and transaction hashes in a farm log.`,
+      text: `Make one qualifying action each week in ${p.name} — ${weeklyFor(p)} — and log the wallet, dates and transaction hashes in a farm log.`,
       cost: 'about $2 of gas a week',
       time: '10 minutes a week',
     },
